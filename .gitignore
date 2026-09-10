@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.log
+.env
+data/
+input_facturas/
+facturas_procesadas/
+facturas_fallidas/
+logs/
+.streamlit/secrets.toml
