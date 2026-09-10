@@ -7,6 +7,18 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
+VALID_LLM_MODES = {
+    "qwen_only",
+    "qwen_gemini",
+}
+
+VALID_RAG_PROVIDERS = {
+    "mock",
+    "qwen",
+    "qwen_gemini",
+}
+
+
 @dataclass(frozen=True)
 class Settings:
     root: Path
@@ -25,11 +37,26 @@ class Settings:
     gemini_api_key: str
     gemini_model: str
 
+    llm_mode: str
+    rag_provider: str
+    rag_top_k: int
+    chroma_collection: str
+
 
 def _as_bool(value: str | None, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _as_int(value: str | None, default: int = 0) -> int:
+    if value is None:
+        return default
+
+    try:
+        return int(value.strip())
+    except ValueError:
+        return default
 
 
 def load_settings(project_root: Path | None = None) -> Settings:
@@ -44,7 +71,7 @@ def load_settings(project_root: Path | None = None) -> Settings:
 
     root = Path(os.getenv("SREED_ROOT", str(root_fallback))).expanduser().resolve()
 
-    return Settings(
+    settings = Settings(
         root=root,
         input_dir=Path(os.getenv("SREED_INPUT_DIR", str(root / "input_facturas"))).expanduser(),
         processed_dir=Path(os.getenv("SREED_PROCESSED_DIR", str(root / "facturas_procesadas"))).expanduser(),
@@ -58,4 +85,42 @@ def load_settings(project_root: Path | None = None) -> Settings:
         use_gpu=_as_bool(os.getenv("SREED_USE_GPU", "false"), False),
         gemini_api_key=os.getenv("SREED_GEMINI_API_KEY", ""),
         gemini_model=os.getenv("SREED_GEMINI_MODEL", "gemini-1.5-flash"),
+        llm_mode=os.getenv("SREED_LLM_MODE", "qwen_only"),
+        rag_provider=os.getenv("SREED_RAG_PROVIDER", "mock"),
+        rag_top_k=_as_int(os.getenv("SREED_RAG_TOP_K", "5"), 5),
+        chroma_collection=os.getenv("SREED_CHROMA_COLLECTION", "sreed_documents"),
     )
+
+    _validate_settings(settings)
+
+    return settings
+
+
+def _validate_settings(settings: Settings) -> None:
+    """
+    Validaciones de configuracion.
+
+    Regla importante:
+    - Gemini solo no esta permitido.
+    - Solo se permiten modos donde Qwen sea principal.
+    """
+
+    if settings.llm_mode not in VALID_LLM_MODES:
+        raise ValueError(
+            "SREED_LLM_MODE invalido. "
+            "Valores permitidos: qwen_only, qwen_gemini. "
+            "Gemini solo no esta permitido."
+        )
+
+    if settings.rag_provider not in VALID_RAG_PROVIDERS:
+        raise ValueError(
+            "SREED_RAG_PROVIDER invalido. "
+            "Valores permitidos: mock, qwen, qwen_gemini. "
+            "Gemini solo no esta permitido."
+        )
+
+    if settings.rag_provider == "gemini_only":
+        raise ValueError(
+            "SREED_RAG_PROVIDER no puede ser gemini_only. "
+            "Gemini solo puede actuar como apoyo de Qwen."
+        )

@@ -10,7 +10,12 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from src.application.use_cases.index_document import IndexDocumentUseCase
+from src.application.use_cases.process_and_index_document import (
+    ProcessAndIndexDocumentUseCase,
+)
 from src.application.use_cases.process_document import ProcessDocumentUseCase
+from src.infrastructure.adapters.chroma_vector_store import ChromaVectorStore
 from src.infrastructure.adapters.local_filesystem_adapter import LocalFileSystemAdapter
 from src.infrastructure.adapters.stub_document_processor import StubDocumentProcessor
 from src.infrastructure.adapters.watchdog_adapter import WatchdogFolderMonitor
@@ -38,8 +43,31 @@ def main() -> None:
     logger = logging.getLogger("sreed.monitor")
 
     file_system = LocalFileSystemAdapter(settings)
+
     processor = StubDocumentProcessor()
-    use_case = ProcessDocumentUseCase(processor, file_system)
+
+    process_use_case = ProcessDocumentUseCase(
+        processor=processor,
+        file_system=file_system,
+    )
+
+    vector_store = ChromaVectorStore(settings)
+
+    try:
+        vector_store.initialize()
+        logger.info("ChromaDB inicializado correctamente desde monitor_rpa.")
+    except Exception:
+        logger.exception(
+            "No se pudo inicializar ChromaDB. "
+            "El monitor seguira activo, pero la indexacion puede fallar."
+        )
+
+    index_use_case = IndexDocumentUseCase(vector_store)
+
+    use_case = ProcessAndIndexDocumentUseCase(
+        process_document=process_use_case,
+        index_document=index_use_case,
+    )
 
     monitor = WatchdogFolderMonitor(
         settings=settings,
