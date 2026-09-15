@@ -19,19 +19,25 @@ class DocumentStatus(str, Enum):
 
 class DocumentResult(BaseModel):
     """
-    Resultado canonico del procesamiento de un documento.
-
-    Este modelo pertenece al dominio. No debe depender de OpenCV,
-    EasyOCR, ChromaDB, Streamlit ni detalles de infraestructura.
+    Resultado canónico del procesamiento de un documento.
+    Usa Pydantic para validación y serialización automática a JSON.
     """
-
     document_id: str = Field(default_factory=lambda: uuid4().hex)
     source_path: Path
     final_path: Optional[Path] = None
     status: DocumentStatus = DocumentStatus.PENDING
     message: str = ""
+    
+    # Payload flexible para guardar OCR crudo, QR, y datos estructurados
     payload: Dict[str, Any] = Field(default_factory=dict)
+    
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    class Config:
+        # Permite que Path se serialice correctamente a string en JSON
+        json_encoders = {
+            Path: str
+        }
 
 
 class ChatRole(str, Enum):
@@ -40,10 +46,7 @@ class ChatRole(str, Enum):
 
 
 class ChatMessage(BaseModel):
-    """
-    Mensaje de chat entre usuario y asistente.
-    """
-
+    """Mensaje de chat entre usuario y asistente."""
     role: ChatRole
     content: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -52,11 +55,9 @@ class ChatMessage(BaseModel):
 class RetrievedDocument(BaseModel):
     """
     Documento recuperado desde una base vectorial.
-
     No depende de ChromaDB. El adaptador de infraestructura debe
     convertir los resultados de ChromaDB a este modelo.
     """
-
     document_id: str
     source_file: str = ""
     score: Optional[float] = None
@@ -67,18 +68,8 @@ class RetrievedDocument(BaseModel):
 class RAGAnswer(BaseModel):
     """
     Respuesta estandarizada del flujo RAG.
-
     La interfaz Streamlit solo debe consumir este modelo.
-    No debe importar si respondio:
-    - MockLLMProvider
-    - QwenLLMProvider
-    - QwenGeminiStrategy
-
-    PENDIENTE IA:
-    - Cuando exista Qwen local, este modelo sera llenado por QwenLLMProvider.
-    - Cuando exista estrategia hibrida, sera llenado por QwenGeminiStrategy.
     """
-
     question: str
     answer: str
     provider: str

@@ -73,5 +73,5 @@ El proyecto se entregará en un repositorio Git estructurado de la siguiente man
 * 📄 `motor_ocr.py` *(Módulo lógico: OpenCV, EasyOCR, pyzbar).*
 * 📄 `extractor_llm.py` *(Módulo de orquestación de LLMs: Prompts para Gemini y Qwen).*
 * 📄 `rag_chat.py` *(Módulo de consulta: Embeddings y recuperación con ChromaDB).*
-* 📄 `requirements.txt` *(Dependencias estrictas para replicar el entorno: opencv-python, easyocr, streamlit, chromadb, google-generativeai, etc.).*
+* 📄 `requirements.txt` *(Dependencias estrictas para replicar el entorno: opencv-python, easyocr, streamlit, chromadb, google-genai", etc.).*
 * 📄 `README.md` *(Documentación técnica, justificación de arquitectura y guía de ejecución).*

@@ -11,7 +11,7 @@ from watchdog.observers import Observer
 
 
 class _FolderEventHandler(FileSystemEventHandler):
-    def __init__(self, monitor: "WatchdogFolderMonitor") -> None:
+    def __init__(self, monitor: "WatchdogAdapter") -> None:
         super().__init__()
         self._monitor = monitor
 
@@ -31,7 +31,7 @@ class _FolderEventHandler(FileSystemEventHandler):
         self._monitor.schedule(Path(event.dest_path))
 
 
-class WatchdogFolderMonitor:
+class WatchdogAdapter:
     """
     Monitor de carpeta basado en watchdog.
 

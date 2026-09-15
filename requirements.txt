@@ -1,0 +1,29 @@
+# Dependencias base
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+tenacity>=8.2.0
+watchdog>=3.0.0
+
+# Streamlit y UI
+streamlit>=1.28.0
+Pillow>=10.0.0
+
+# OCR y procesamiento de imágenes
+opencv-python>=4.8.0
+easyocr>=1.7.0
+pyzbar>=0.1.9
+
+# Procesamiento de PDFs
+PyMuPDF>=1.23.0
+
+# Base de datos vectorial
+chromadb>=0.4.0
+
+# Cliente Ollama
+ollama>=0.1.0
+
+# Cliente Gemini 
+google-genai>=2.23.0
+
+# Utilidades
+numpy>=1.24.0

@@ -12,35 +12,45 @@ VALID_LLM_MODES = {
     "qwen_gemini",
 }
 
-VALID_RAG_PROVIDERS = {
-    "mock",
-    "qwen",
-    "qwen_gemini",
-}
-
 
 @dataclass(frozen=True)
 class Settings:
+    # Rutas de negocio
     root: Path
     input_dir: Path
     processed_dir: Path
     failed_dir: Path
-    log_dir: Path
+    
+    # Rutas técnicas
     chroma_dir: Path
-
-    llm_provider: str
+    log_dir: Path
+    models_dir: Path
+    
+    # Ollama / Qwen
     ollama_host: str
-    ollama_model: str
-    ocr_langs: str
+    primary_model: str
+    fallback_model: str
+    context_window: int
+    llm_timeout: int
+    
+    # OCR
+    ocr_languages: list
     use_gpu: bool
-
+    pdf_dpi: int
+    
+    # ChromaDB / RAG
+    chroma_collection: str
+    rag_top_k: int
+    
+    # Gemini (opcional)
     gemini_api_key: str
     gemini_model: str
-
+    
+    # Modo de operación
     llm_mode: str
-    rag_provider: str
-    rag_top_k: int
-    chroma_collection: str
+    
+    # Logging
+    log_level: str
 
 
 def _as_bool(value: str | None, default: bool = False) -> bool:
@@ -59,11 +69,17 @@ def _as_int(value: str | None, default: int = 0) -> int:
         return default
 
 
+def _as_list(value: str | None, default: list = None) -> list:
+    if value is None:
+        return default or []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
 def load_settings(project_root: Path | None = None) -> Settings:
     """
-    Carga configuracion desde .env.
+    Carga configuración desde .env.
 
-    Si falta una variable, usa rutas relativas basadas en la raiz del proyecto.
+    Si falta una variable, usa rutas relativas basadas en la raíz del proyecto.
     """
 
     root_fallback = Path(project_root or Path(__file__).resolve().parents[2]).resolve()
@@ -72,24 +88,56 @@ def load_settings(project_root: Path | None = None) -> Settings:
     root = Path(os.getenv("SREED_ROOT", str(root_fallback))).expanduser().resolve()
 
     settings = Settings(
+        # Rutas de negocio
         root=root,
-        input_dir=Path(os.getenv("SREED_INPUT_DIR", str(root / "input_facturas"))).expanduser(),
-        processed_dir=Path(os.getenv("SREED_PROCESSED_DIR", str(root / "facturas_procesadas"))).expanduser(),
-        failed_dir=Path(os.getenv("SREED_FAILED_DIR", str(root / "facturas_fallidas"))).expanduser(),
-        log_dir=Path(os.getenv("SREED_LOG_DIR", str(root / "logs"))).expanduser(),
-        chroma_dir=Path(os.getenv("SREED_CHROMA_DIR", str(root / "data" / "chroma"))).expanduser(),
-        llm_provider=os.getenv("SREED_LLM_PROVIDER", "qwen"),
-        ollama_host=os.getenv("SREED_OLLAMA_HOST", "http://127.0.0.1:11434"),
-        ollama_model=os.getenv("SREED_OLLAMA_MODEL", "qwen2.5:7b"),
-        ocr_langs=os.getenv("SREED_OCR_LANGS", "es,en"),
-        use_gpu=_as_bool(os.getenv("SREED_USE_GPU", "false"), False),
-        gemini_api_key=os.getenv("SREED_GEMINI_API_KEY", ""),
-        gemini_model=os.getenv("SREED_GEMINI_MODEL", "gemini-1.5-flash"),
-        llm_mode=os.getenv("SREED_LLM_MODE", "qwen_only"),
-        rag_provider=os.getenv("SREED_RAG_PROVIDER", "mock"),
-        rag_top_k=_as_int(os.getenv("SREED_RAG_TOP_K", "5"), 5),
+        input_dir=Path(os.getenv("SREED_INPUT_DIR", str(root / "invoices" / "input"))).expanduser(),
+        processed_dir=Path(os.getenv("SREED_PROCESSED_DIR", str(root / "invoices" / "processed"))).expanduser(),
+        failed_dir=Path(os.getenv("SREED_FAILED_DIR", str(root / "invoices" / "failed"))).expanduser(),
+        
+        # Rutas técnicas
+        chroma_dir=Path(os.getenv("SREED_CHROMA_DIR", str(root / "resources" / "chroma"))).expanduser(),
+        log_dir=Path(os.getenv("SREED_LOG_DIR", str(root / "resources" / "logs"))).expanduser(),
+        models_dir=Path(os.getenv("SREED_MODELS_DIR", str(root / "resources" / "models"))).expanduser(),
+        
+        # Ollama / Qwen
+        ollama_host=os.getenv("SREED_OLLAMA_HOST", "http://localhost:11434"),
+        primary_model=os.getenv("SREED_PRIMARY_MODEL", "qwen3.5:9b"),
+        fallback_model=os.getenv("SREED_FALLBACK_MODEL", "qwen2.5:7b"),
+        context_window=_as_int(os.getenv("SREED_CONTEXT_WINDOW", "4096"), 4096),
+        llm_timeout=_as_int(os.getenv("SREED_LLM_TIMEOUT", "120"), 120),
+        
+        # OCR
+        ocr_languages=_as_list(os.getenv("SREED_OCR_LANGUAGES", "es,en"), ["es", "en"]),
+        use_gpu=_as_bool(os.getenv("SREED_USE_GPU", "true"), True),
+        pdf_dpi=_as_int(os.getenv("SREED_PDF_DPI", "200"), 200),
+        
+        # ChromaDB / RAG
         chroma_collection=os.getenv("SREED_CHROMA_COLLECTION", "sreed_documents"),
+        rag_top_k=_as_int(os.getenv("SREED_RAG_TOP_K", "5"), 5),
+        
+        # Gemini (opcional)
+        gemini_api_key=os.getenv("SREED_GEMINI_API_KEY", ""),
+        gemini_model=os.getenv("SREED_GEMINI_MODEL", "gemini-flash-latest"),
+        
+        # Modo de operación
+        llm_mode=os.getenv("SREED_LLM_MODE", "qwen_only"),
+        
+        # Logging
+        log_level=os.getenv("SREED_LOG_LEVEL", "INFO"),
     )
+
+    # Crear directorios si no existen
+    directories_to_create = [
+        settings.input_dir,
+        settings.processed_dir,
+        settings.failed_dir,
+        settings.chroma_dir,
+        settings.log_dir,
+        settings.models_dir,
+    ]
+    
+    for directory in directories_to_create:
+        directory.mkdir(parents=True, exist_ok=True)
 
     _validate_settings(settings)
 
@@ -98,29 +146,22 @@ def load_settings(project_root: Path | None = None) -> Settings:
 
 def _validate_settings(settings: Settings) -> None:
     """
-    Validaciones de configuracion.
+    Validaciones de configuración.
 
     Regla importante:
-    - Gemini solo no esta permitido.
+    - Gemini solo no está permitido.
     - Solo se permiten modos donde Qwen sea principal.
     """
 
     if settings.llm_mode not in VALID_LLM_MODES:
         raise ValueError(
-            "SREED_LLM_MODE invalido. "
+            "SREED_LLM_MODE inválido. "
             "Valores permitidos: qwen_only, qwen_gemini. "
-            "Gemini solo no esta permitido."
+            "Gemini solo no está permitido."
         )
 
-    if settings.rag_provider not in VALID_RAG_PROVIDERS:
+    # Si se usa modo qwen_gemini, debe haber API key de Gemini
+    if settings.llm_mode == "qwen_gemini" and not settings.gemini_api_key:
         raise ValueError(
-            "SREED_RAG_PROVIDER invalido. "
-            "Valores permitidos: mock, qwen, qwen_gemini. "
-            "Gemini solo no esta permitido."
-        )
-
-    if settings.rag_provider == "gemini_only":
-        raise ValueError(
-            "SREED_RAG_PROVIDER no puede ser gemini_only. "
-            "Gemini solo puede actuar como apoyo de Qwen."
+            "SREED_GEMINI_API_KEY es requerida cuando SREED_LLM_MODE=qwen_gemini"
         )

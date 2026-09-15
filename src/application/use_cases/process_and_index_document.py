@@ -15,13 +15,13 @@ class ProcessAndIndexDocumentUseCase:
     Caso de uso compuesto.
 
     Flujo:
-    1. Procesa un documento usando ProcessDocumentUseCase.
+    1. Procesa un documento usando ProcessDocumentUseCase (OCR + Qwen).
     2. Si el procesamiento fue exitoso, lo indexa usando IndexDocumentUseCase.
 
     Este caso de uso existe para no modificar ProcessDocumentUseCase.
-    Tambien mantiene separadas las responsabilidades:
-    - procesar documento
-    - indexar documento
+    También mantiene separadas las responsabilidades:
+    - procesar documento (OCR + LLM)
+    - indexar documento (ChromaDB)
     """
 
     def __init__(
@@ -46,7 +46,7 @@ class ProcessAndIndexDocumentUseCase:
                 )
             else:
                 logger.warning(
-                    "El documento se proceso correctamente, pero fallo la indexacion. "
+                    "El documento se procesó correctamente, pero falló la indexación. "
                     "ID: %s. Archivo: %s",
                     result.document_id,
                     result.source_path,
@@ -55,7 +55,7 @@ class ProcessAndIndexDocumentUseCase:
             logger.info(
                 "Documento no indexado porque el procesamiento no fue exitoso. "
                 "Estado: %s. Archivo: %s",
-                result.status.value,
+                result.status.value if hasattr(result.status, 'value') else result.status,
                 result.source_path,
             )
 

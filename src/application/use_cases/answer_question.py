@@ -21,12 +21,8 @@ class AnswerQuestionUseCase:
     4. Delega la respuesta al LLMProvider.
 
     El caso de uso no sabe si el proveedor es:
-    - MockLLMProvider
-    - QwenLLMProvider
-    - QwenGeminiStrategy
-
-    REGLA:
-    - Nunca debe existir un proveedor Gemini solo.
+    - QwenOllamaProvider
+    - QwenGeminiStrategy (futuro)
     """
 
     def __init__(
@@ -46,10 +42,6 @@ class AnswerQuestionUseCase:
     ) -> RAGAnswer:
         """
         Ejecuta la consulta RAG.
-
-        PENDIENTE IA:
-        - Cuando exista Qwen local, el LLMProvider sera QwenLLMProvider.
-        - Cuando exista modo hibrido, el LLMProvider sera QwenGeminiStrategy.
         """
 
         question = question.strip()
@@ -57,7 +49,7 @@ class AnswerQuestionUseCase:
         if not question:
             return RAGAnswer(
                 question="",
-                answer="La pregunta esta vacia.",
+                answer="La pregunta está vacía.",
                 provider="system",
                 retrieved_documents=[],
             )
@@ -75,8 +67,19 @@ class AnswerQuestionUseCase:
             raise
 
         try:
-            return self._llm_provider.answer(
+            # Construir contexto a partir de documentos recuperados
+            context = "\n\n".join([
+                f"Documento: {doc.source_file}\n{doc.snippet}"
+                for doc in retrieved_documents
+            ])
+            
+            # Obtener respuesta del LLM
+            answer_text = self._llm_provider.answer_question(question, context)
+            
+            return RAGAnswer(
                 question=question,
+                answer=answer_text,
+                provider=f"qwen-{self._llm_provider.primary_model}",
                 retrieved_documents=retrieved_documents,
             )
         except Exception:
