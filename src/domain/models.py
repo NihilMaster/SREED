@@ -55,8 +55,8 @@ class ChatMessage(BaseModel):
 class RetrievedDocument(BaseModel):
     """
     Documento recuperado desde una base vectorial.
-    No depende de ChromaDB. El adaptador de infraestructura debe
-    convertir los resultados de ChromaDB a este modelo.
+    No depende de FAISS. El adaptador de infraestructura debe
+    convertir los resultados de FAISS a este modelo.
     """
     document_id: str
     source_file: str = ""

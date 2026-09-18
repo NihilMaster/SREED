@@ -15,7 +15,7 @@ from src.application.use_cases.process_and_index_document import (
     ProcessAndIndexDocumentUseCase,
 )
 from src.application.use_cases.process_document import ProcessDocumentUseCase
-from src.infrastructure.adapters.chroma import ChromaVectorStore
+from src.infrastructure.adapters.faiss.vector_store import FAISSVectorStore
 from src.infrastructure.adapters.filesystem import LocalFileSystemAdapter
 from src.infrastructure.adapters.llm import GeminiVisionProvider, QwenOllamaProvider
 from src.infrastructure.adapters.ocr import OCRRealDocumentProcessor
@@ -26,7 +26,8 @@ from src.infrastructure.config import load_settings
 def configure_logging(settings) -> None:
     settings.log_dir.mkdir(parents=True, exist_ok=True)
     log_file = settings.log_dir / "monitor_rpa.log"
-
+    
+    # Configuración base
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -35,6 +36,10 @@ def configure_logging(settings) -> None:
             logging.FileHandler(log_file, encoding="utf-8"),
         ],
     )
+    
+    # Logger específico para RAG (más verboso)
+    rag_logger = logging.getLogger("src.infrastructure.adapters.llm.qwen_ollama_provider")
+    rag_logger.setLevel(logging.DEBUG)
 
 
 def main() -> None:
@@ -90,15 +95,15 @@ def main() -> None:
         file_system=file_system,
     )
 
-    # Vector store para ChromaDB
-    vector_store = ChromaVectorStore(settings)
+    # Vector store para FAISS
+    vector_store = FAISSVectorStore(settings)
 
     try:
         vector_store.initialize()
-        logger.info("ChromaDB inicializado correctamente desde monitor_rpa.")
+        logger.info("FAISS Vector Store inicializado correctamente desde monitor_rpa.")
     except Exception:
         logger.exception(
-            "No se pudo inicializar ChromaDB. "
+            "No se pudo inicializar FAISS Vector Store. "
             "El monitor seguirá activo, pero la indexación puede fallar."
         )
 

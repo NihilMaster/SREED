@@ -62,7 +62,7 @@ class LocalFileSystemAdapter:
             self._settings.processed_dir,
             self._settings.failed_dir,
             self._settings.log_dir,
-            self._settings.chroma_dir,
+            self._settings.faiss_dir,
         ]
 
         for directory in directories:

@@ -9,14 +9,14 @@ invoices/processed/*
 invoices/failed/*
 
 # Recursos técnicos
-resources/chroma/*
+resources/faiss/*
 resources/logs/*
 
 # Mantener estructura de carpetas
 !invoices/input/.gitkeep
 !invoices/processed/.gitkeep
 !invoices/failed/.gitkeep
-!resources/chroma/.gitkeep
+!resources/faiss/.gitkeep
 !resources/logs/.gitkeep
 !resources/models/
 !resources/temp/.gitkeep

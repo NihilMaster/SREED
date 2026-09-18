@@ -4,19 +4,19 @@ import json
 import re
 import sys
 import time
+import logging
 from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
 
 ROOT = Path(__file__).resolve().parents[2]
-
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.application.use_cases.answer_question import AnswerQuestionUseCase
 from src.domain.models import ChatMessage, ChatRole
-from src.infrastructure.adapters.chroma import ChromaVectorStore
+from src.infrastructure.adapters.faiss.vector_store import FAISSVectorStore
 from src.infrastructure.adapters.filesystem import LocalFileSystemAdapter
 from src.infrastructure.adapters.llm import QwenOllamaProvider
 from src.infrastructure.config import load_settings
@@ -27,16 +27,36 @@ st.set_page_config(
 )
 
 
+def configure_streamlit_logging():
+    """Configura logging estructurado para Streamlit"""
+    log_dir = ROOT / "resources" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    
+    log_file = log_dir / "streamlit.log"
+    
+    # Configuración base
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        handlers=[
+            logging.FileHandler(log_file, encoding="utf-8"),
+            logging.StreamHandler(sys.stdout),
+        ],
+    )
+    
+    # Logger específico para RAG
+    rag_logger = logging.getLogger("sreed.rag")
+    rag_logger.setLevel(logging.DEBUG)
+
+
 @st.cache_resource
 def get_services():
     settings = load_settings(ROOT)
     file_system = LocalFileSystemAdapter(settings)
-
-    vector_store = ChromaVectorStore(settings)
+    vector_store = FAISSVectorStore(settings)
     vector_store.initialize()
-
+    
     llm_timeout = getattr(settings, "llm_timeout", 1800)
-
     llm_provider = QwenOllamaProvider(
         primary_model=settings.primary_model,
         fallback_model=settings.fallback_model,
@@ -44,13 +64,11 @@ def get_services():
         context_window=settings.context_window,
         timeout=llm_timeout,
     )
-
     answer_use_case = AnswerQuestionUseCase(
         vector_store=vector_store,
         llm_provider=llm_provider,
         top_k=settings.rag_top_k,
     )
-
     return settings, file_system, vector_store, answer_use_case
 
 
@@ -79,7 +97,6 @@ def render_header(settings) -> None:
 def render_sidebar(settings, vector_store) -> None:
     with st.sidebar:
         st.header("Estado del Sistema")
-
         st.write(f"Modelo principal: {settings.primary_model}")
         st.write(f"Modelo fallback: {settings.fallback_model}")
         st.write(f"Modo LLM: {settings.llm_mode}")
@@ -87,29 +104,21 @@ def render_sidebar(settings, vector_store) -> None:
         st.write(f"Ollama Host: {settings.ollama_host}")
         st.write(f"Contexto: {settings.context_window} tokens")
         st.write(f"Timeout LLM: {getattr(settings, 'llm_timeout', 1800)}s")
-
         st.divider()
-
         st.write(f"OCR idiomas: {', '.join(settings.ocr_languages)}")
         st.write(f"GPU OCR: {'Sí' if settings.use_gpu else 'No'}")
         st.write(f"PDF DPI: {settings.pdf_dpi}")
-
         st.divider()
-
         try:
             document_count = vector_store.count()
             st.write(f"Documentos indexados: {document_count}")
         except Exception:
             st.write("Documentos indexados: error")
-
-        st.write(f"Colección: {settings.chroma_collection}")
-
+        st.write(f"Colección: {settings.faiss_collection}")
         st.divider()
-
         st.write(f"Entrada: {settings.input_dir}")
         st.write(f"Procesados: {settings.processed_dir}")
         st.write(f"Fallidos: {settings.failed_dir}")
-
         if st.button("Actualizar vista", key="sidebar_refresh"):
             st.rerun()
 
@@ -154,7 +163,7 @@ def render_monitor_tab(settings, file_system) -> None:
         except OSError:
             continue
 
-    st.dataframe(rows, use_container_width=True)
+    st.dataframe(rows, width="stretch")
 
 
 def render_manual_tab(settings, file_system) -> None:
@@ -163,7 +172,6 @@ def render_manual_tab(settings, file_system) -> None:
         "Los archivos se procesarán sincrónicamente con monitoreo activo para reflejar "
         "el progreso de cada etapa."
     )
-
     uploaded_files = st.file_uploader(
         "Seleccionar facturas",
         type=["pdf", "png", "jpg", "jpeg", "tif", "tiff"],
@@ -179,35 +187,28 @@ def render_manual_tab(settings, file_system) -> None:
                 status.update(label=f"1. Guardando {uploaded_file.name} en carpeta de entrada...")
                 destination = save_uploaded_file(settings, uploaded_file)
                 time.sleep(0.5)
-
                 status.update(label="2. Esperando detección del monitor y ejecución de OCR...")
                 processed_path = None
                 failed_path = None
-                max_wait = 300  # Máximo 5 minutos de espera por archivo
-
-                # Extracción del stem sin extensión
-                uploaded_stem = Path(uploaded_file.name).stem
-
+                max_wait = 300
                 for _ in range(max_wait):
                     time.sleep(1)
                     proc_files = [
                         f for f in settings.processed_dir.iterdir()
                         if f.name.endswith(uploaded_file.name)
-                        or (f.stem.endswith(uploaded_stem) and f.suffix in ['.json', '.jpg', '.png', '.jpeg', '.pdf'])
+                        or (f.stem.endswith(uploaded_file.stem) and f.suffix in ['.json', '.jpg', '.png'])
                     ]
                     fail_files = [
                         f for f in settings.failed_dir.iterdir()
                         if f.name.endswith(uploaded_file.name)
-                        or (f.stem.endswith(uploaded_stem) and f.suffix in ['.json', '.jpg', '.png', '.jpeg', '.pdf'])
+                        or (f.stem.endswith(uploaded_file.stem) and f.suffix in ['.json', '.jpg', '.png'])
                     ]
-
                     if proc_files:
                         processed_path = proc_files[0]
                         break
                     if fail_files:
                         failed_path = fail_files[0]
                         break
-
                 if processed_path:
                     status.update(
                         label="3. Extracción y estructuración LLM completada exitosamente.",
@@ -230,13 +231,11 @@ def render_manual_tab(settings, file_system) -> None:
 
 def render_results_tab(settings, file_system) -> None:
     st.subheader("Resultados")
-
     option = st.radio(
         "Carpeta",
         ["Procesados", "Fallidos"],
         horizontal=True,
     )
-
     directory = settings.processed_dir if option == "Procesados" else settings.failed_dir
     files = file_system.list_files(directory)
 
@@ -252,7 +251,6 @@ def render_results_tab(settings, file_system) -> None:
         files,
         format_func=lambda path: path.name,
     )
-
     if selected is None:
         return
 
@@ -268,7 +266,7 @@ def render_results_tab(settings, file_system) -> None:
         formatted_json = json.dumps(sidecar, indent=2, ensure_ascii=False)
     else:
         formatted_json = str(sidecar)
-
+    
     st.code(formatted_json, language="json")
 
 
@@ -278,7 +276,6 @@ def render_rag_tab(settings, vector_store, answer_use_case) -> None:
         "Proveedor RAG actual: Qwen local. "
         "El sistema recupera documentos de la base vectorial y genera respuestas basadas en el contexto."
     )
-
     try:
         document_count = vector_store.count()
         st.write(f"Documentos indexados: {document_count}")
@@ -287,7 +284,6 @@ def render_rag_tab(settings, vector_store, answer_use_case) -> None:
 
     if "rag_chat" not in st.session_state:
         st.session_state.rag_chat = []
-
     if "rag_last_answer" not in st.session_state:
         st.session_state.rag_last_answer = None
 
@@ -300,7 +296,6 @@ def render_rag_tab(settings, vector_store, answer_use_case) -> None:
             rag_answer = st.session_state.rag_last_answer
             st.write(f"Proveedor: {getattr(rag_answer, 'provider', 'Qwen')}")
             st.write(f"Pregunta: {rag_answer.question}")
-
             if rag_answer.retrieved_documents:
                 rows = []
                 for doc in rag_answer.retrieved_documents:
@@ -312,8 +307,7 @@ def render_rag_tab(settings, vector_store, answer_use_case) -> None:
                             "snippet": doc.snippet[:200],
                         }
                     )
-                st.dataframe(rows, use_container_width=True)
-
+                st.dataframe(rows, width="stretch")
                 for doc in rag_answer.retrieved_documents:
                     st.markdown(f"**Documento:** {doc.source_file or doc.document_id}")
                     st.code(doc.snippet, language="text")
@@ -328,81 +322,69 @@ def render_rag_tab(settings, vector_store, answer_use_case) -> None:
             st.rerun()
 
     question = st.chat_input("Escribe una pregunta sobre las facturas procesadas")
-
     if question:
         st.session_state.rag_chat.append(ChatMessage(role=ChatRole.USER, content=question))
-
         with st.status("Procesando consulta RAG...", expanded=True) as status:
             status.update(label="Buscando documentos relevantes en la base vectorial...")
             time.sleep(0.3)
             status.update(label="Generando respuesta con el modelo LLM...")
-
             try:
                 rag_answer = answer_use_case.execute(question)
                 status.update(label="Respuesta generada exitosamente.", state="complete")
             except Exception as exc:
                 status.update(label=f"Error consultando RAG: {exc}", state="error")
                 rag_answer = None
-
+        
         if rag_answer:
             assistant_text = rag_answer.answer
-
             if rag_answer.retrieved_documents:
                 sources = ", ".join(
                     doc.source_file or doc.document_id
                     for doc in rag_answer.retrieved_documents[:5]
                 )
                 assistant_text += f"\n\n**Fuentes recuperadas:** {sources}"
-
             st.session_state.rag_chat.append(
                 ChatMessage(role=ChatRole.ASSISTANT, content=assistant_text)
             )
             st.session_state.rag_last_answer = rag_answer
-
         st.rerun()
 
 
 def render_config_tab(settings) -> None:
     st.subheader("Configuración")
-
     gemini_key = "****" if settings.gemini_api_key else "(no configurada)"
-
     content = f"""
 SREED_ROOT={settings.root}
 SREED_INPUT_DIR={settings.input_dir}
 SREED_PROCESSED_DIR={settings.processed_dir}
 SREED_FAILED_DIR={settings.failed_dir}
 SREED_LOG_DIR={settings.log_dir}
-SREED_CHROMA_DIR={settings.chroma_dir}
+SREED_FAISS_DIR={settings.faiss_dir}
 SREED_MODELS_DIR={settings.models_dir}
-
 SREED_OLLAMA_HOST={settings.ollama_host}
 SREED_PRIMARY_MODEL={settings.primary_model}
 SREED_FALLBACK_MODEL={settings.fallback_model}
 SREED_CONTEXT_WINDOW={settings.context_window}
 SREED_LLM_TIMEOUT={getattr(settings, 'llm_timeout', 1800)}
-
 SREED_OCR_LANGUAGES={','.join(settings.ocr_languages)}
 SREED_USE_GPU={settings.use_gpu}
 SREED_PDF_DPI={settings.pdf_dpi}
-
-SREED_CHROMA_COLLECTION={settings.chroma_collection}
+SREED_FAISS_COLLECTION={settings.faiss_collection}
 SREED_RAG_TOP_K={settings.rag_top_k}
-
 SREED_GEMINI_API_KEY={gemini_key}
 SREED_GEMINI_MODEL={settings.gemini_model}
-
 SREED_LLM_MODE={settings.llm_mode}
 SREED_LOG_LEVEL={settings.log_level}
 """
-
     st.code(content, language="text")
     st.caption("Para modificar estos valores edite el archivo .env y reinicie los procesos.")
 
 
 def main() -> None:
+    # Configurar logging estructurado
+    configure_streamlit_logging()
+    
     settings, file_system, vector_store, answer_use_case = get_services()
-
     render_header(settings)
     render_sidebar(settings, vector_store)
 
@@ -415,19 +397,14 @@ def main() -> None:
             "Configuración",
         ]
     )
-
     with tab_monitor:
         render_monitor_tab(settings, file_system)
-
     with tab_manual:
         render_manual_tab(settings, file_system)
-
     with tab_results:
         render_results_tab(settings, file_system)
-
     with tab_rag:
         render_rag_tab(settings, vector_store, answer_use_case)
-
     with tab_config:
         render_config_tab(settings)
 

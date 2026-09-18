@@ -10,12 +10,12 @@ class VectorStore(Protocol):
     Puerto para bases de datos vectoriales.
 
     Implementaciones posibles:
-    - ChromaVectorStoreAdapter
+    - - FAISSVectorStoreAdapter
     - PgVectorAdapter en el futuro
     - QdrantAdapter en el futuro
     - FAISSAdapter en el futuro
 
-    La aplicacion no debe depender directamente de ChromaDB.
+    La aplicacion no debe depender directamente de FAISS.
     """
 
     def initialize(self) -> None:
@@ -56,7 +56,7 @@ class VectorStore(Protocol):
         Busca documentos similares a la pregunta.
 
         Debe devolver modelos de dominio RetrievedDocument,
-        no objetos internos de ChromaDB.
+        no objetos internos de FAISS.
         """
         ...
 

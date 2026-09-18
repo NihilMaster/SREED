@@ -1,37 +1,27 @@
-from __future__ import annotations
+from typing import Protocol
 
-from typing import List, Protocol
-
-from src.domain.models import RAGAnswer, RetrievedDocument
+from src.domain.models import DocumentResult
 
 
 class LLMProvider(Protocol):
     """
-    Puerto para proveedores de respuesta RAG.
+    Puerto para proveedores de estructuracion y respuesta RAG.
 
-    Implementaciones previstas:
-    - MockLLMProvider
-    - QwenLLMProvider
-    - QwenGeminiStrategy
+    Implementaciones:
+    - QwenOllamaProvider (local)
+    - QwenGeminiStrategy (hibrida: Qwen principal + Gemini como apoyo)
 
     Regla de negocio:
-    - Nunca debe existir un proveedor Gemini solo.
-    - Gemini solo puede aparecer como apoyo dentro de una estrategia
-      donde Qwen sea el modelo principal.
+    - Gemini nunca actua como proveedor unico.
     """
 
-    def answer(
-        self,
-        question: str,
-        retrieved_documents: List[RetrievedDocument],
-    ) -> RAGAnswer:
-        """
-        Genera una respuesta a partir de una pregunta y documentos recuperados.
+    def process(self, document_result: DocumentResult) -> DocumentResult:
+        """Estructura el texto OCR dentro de payload['estructura']."""
+        ...
 
-        PENDIENTE IA:
-        - MockLLMProvider devolvera una respuesta simulada.
-        - QwenLLMProvider usara Ollama/Qwen local.
-        - QwenGeminiStrategy combinara Qwen local con apoyo opcional de Gemini,
-          pero sin convertir a Gemini en proveedor unico.
+    def answer_question(self, question: str, context: str) -> str:
+        """
+        Responde una pregunta usando UNICAMENTE el contexto recuperado.
+        Devuelve texto libre (no JSON).
         """
         ...

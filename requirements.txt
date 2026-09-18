@@ -17,7 +17,8 @@ pyzbar>=0.1.9
 PyMuPDF>=1.23.0
 
 # Base de datos vectorial
-chromadb>=0.4.0
+faiss-cpu>=1.7.0
+sentence-transformers>=2.3.0
 
 # Cliente Ollama
 ollama>=0.1.0

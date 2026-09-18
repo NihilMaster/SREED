@@ -22,7 +22,7 @@ class Settings:
     failed_dir: Path
     
     # Rutas técnicas
-    chroma_dir: Path
+    faiss_dir: Path
     log_dir: Path
     models_dir: Path
     
@@ -38,8 +38,8 @@ class Settings:
     use_gpu: bool
     pdf_dpi: int
     
-    # ChromaDB / RAG
-    chroma_collection: str
+    # FAISS / RAG
+    faiss_collection: str
     rag_top_k: int
     
     # Gemini (opcional)
@@ -95,7 +95,7 @@ def load_settings(project_root: Path | None = None) -> Settings:
         failed_dir=Path(os.getenv("SREED_FAILED_DIR", str(root / "invoices" / "failed"))).expanduser(),
         
         # Rutas técnicas
-        chroma_dir=Path(os.getenv("SREED_CHROMA_DIR", str(root / "resources" / "chroma"))).expanduser(),
+        faiss_dir=Path(os.getenv("SREED_FAISS_DIR", str(root / "resources" / "faiss"))).expanduser(),
         log_dir=Path(os.getenv("SREED_LOG_DIR", str(root / "resources" / "logs"))).expanduser(),
         models_dir=Path(os.getenv("SREED_MODELS_DIR", str(root / "resources" / "models"))).expanduser(),
         
@@ -111,8 +111,8 @@ def load_settings(project_root: Path | None = None) -> Settings:
         use_gpu=_as_bool(os.getenv("SREED_USE_GPU", "true"), True),
         pdf_dpi=_as_int(os.getenv("SREED_PDF_DPI", "200"), 200),
         
-        # ChromaDB / RAG
-        chroma_collection=os.getenv("SREED_CHROMA_COLLECTION", "sreed_documents"),
+        # FAISS / RAG
+        faiss_collection=os.getenv("SREED_FAISS_COLLECTION", "sreed_documents"),
         rag_top_k=_as_int(os.getenv("SREED_RAG_TOP_K", "5"), 5),
         
         # Gemini (opcional)
@@ -131,7 +131,7 @@ def load_settings(project_root: Path | None = None) -> Settings:
         settings.input_dir,
         settings.processed_dir,
         settings.failed_dir,
-        settings.chroma_dir,
+        settings.faiss_dir,
         settings.log_dir,
         settings.models_dir,
     ]

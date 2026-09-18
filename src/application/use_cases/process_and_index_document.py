@@ -21,7 +21,7 @@ class ProcessAndIndexDocumentUseCase:
     Este caso de uso existe para no modificar ProcessDocumentUseCase.
     También mantiene separadas las responsabilidades:
     - procesar documento (OCR + LLM)
-    - indexar documento (ChromaDB)
+    - indexar documento (FAISS)
     """
 
     def __init__(

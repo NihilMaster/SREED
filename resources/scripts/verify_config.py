@@ -30,9 +30,9 @@ def verify_configuration():
         print(f"  Failed:    {settings.failed_dir} {'✓' if settings.failed_dir.exists() else '✗'}")
         
         print("\nRUTAS TÉCNICAS:")
-        print(f"  Chroma:    {settings.chroma_dir} {'✓' if settings.chroma_dir.exists() else '✗'}")
         print(f"  Logs:      {settings.log_dir} {'✓' if settings.log_dir.exists() else '✗'}")
         print(f"  Models:    {settings.models_dir} {'✓' if settings.models_dir.exists() else '✗'}")
+        print(f"  FAISS:     {settings.faiss_dir} {'✓' if settings.faiss_dir.exists() else '✗'}")
         
         print("\nCONFIGURACIÓN OLLAMA:")
         print(f"  Host:            {settings.ollama_host}")
@@ -47,7 +47,7 @@ def verify_configuration():
         print(f"  PDF DPI:  {settings.pdf_dpi}")
         
         print("\nCONFIGURACIÓN RAG:")
-        print(f"  Colección: {settings.chroma_collection}")
+        print(f"  Colección: {settings.faiss_collection}")
         print(f"  Top K:     {settings.rag_top_k}")
         
         print("\nMODO DE OPERACIÓN:")
