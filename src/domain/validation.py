@@ -75,34 +75,55 @@ def normalize_invoice_structure(structure: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def validate_invoice_structure(structure: Dict[str, Any]) -> List[str]:
-    """Validaciones deterministicas posteriores al LLM."""
+    """
+    Validaciones deterministicas con distincion de regimen:
+
+    - Regimen IVA incluido (tickets retail): subtotal ≈ total.
+      El IVA reportado es informativo y no puede exceder el total.
+    - Regimen additive (facturas B2B): subtotal + impuestos = total.
+    """
     issues: List[str] = []
 
     subtotal = _as_float(structure.get("subtotal"))
     impuestos = _as_float(structure.get("impuestos"))
     total = _as_float(structure.get("total"))
 
+    items = structure.get("items")
+    suma_items = 0.0
+    if isinstance(items, list):
+        suma_items = sum(
+            _as_float(i.get("total_item")) or 0.0
+            for i in items if isinstance(i, dict)
+        )
+
     if total is None:
         issues.append("total_ausente")
+        return issues
 
-    if total is not None and subtotal is not None:
-        if impuestos is not None:
+    tolerancia = max(0.01 * abs(total), 100.0)
+    iva_incluido = subtotal is not None and abs(subtotal - total) <= tolerancia
+
+    if iva_incluido:
+        if impuestos is not None and impuestos > total:
+            issues.append(
+                f"impuestos_sospechoso: {impuestos:.2f} excede total {total:.2f} "
+                "(posible valor de caja o cambio mal interpretado)"
+            )
+        if suma_items > 0:
+            desvio = min(abs(suma_items - subtotal), abs(suma_items - total))
+            if desvio > tolerancia:
+                issues.append(f"items_no_suman: {suma_items:.2f} vs subtotal/total")
+    else:
+        if subtotal is not None and impuestos is not None:
             esperado = subtotal + impuestos
             if abs(esperado - total) > 0.05:
                 issues.append(
                     f"suma_inconsistente: subtotal+impuestos={esperado:.2f} vs total={total:.2f}"
                 )
-        elif abs(subtotal - total) > 0.05:
-            issues.append("impuestos_no_declarados: total difiere de subtotal pero impuestos es null")
-
-    items = structure.get("items")
-    if isinstance(items, list) and items and subtotal is not None:
-        suma_items = sum(
-            _as_float(i.get("total_item")) or 0.0
-            for i in items if isinstance(i, dict)
-        )
-        if suma_items > 0 and abs(suma_items - subtotal) > 0.05:
-            issues.append(f"items_no_suman: {suma_items:.2f} vs subtotal={subtotal:.2f}")
+        if suma_items > 0 and subtotal is not None:
+            desvio = min(abs(suma_items - subtotal), abs(suma_items - total))
+            if desvio > 0.05:
+                issues.append(f"items_no_suman: {suma_items:.2f} vs subtotal={subtotal:.2f}")
 
     fecha = structure.get("fecha")
     if fecha is not None and not FECHA_RE.match(str(fecha)):
