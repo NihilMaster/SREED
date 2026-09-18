@@ -1,77 +1,137 @@
-# Sistema Resiliente de Extracción Estructurada de Documentos (SREED)
+# SREED - Sistema Resiliente de Extracción Estructurada de Documentos
 
-## 1. Resumen Ejecutivo
+Sistema local de procesamiento automático de facturas escaneadas o digitales, diseñado para entornos con documentos de calidad variable (arrugados, rotos, con sellos superpuestos, en español e inglés). Combina visión por computadora clásica, modelos de lenguaje locales y visión multimodal en la nube para producir extracciones estructuradas con validación determinística.
 
-El SREED es un Producto Mínimo Viable (MVP) diseñado para automatizar la recepción, lectura y estructuración de datos de documentos no estructurados (facturas físicas escaneadas o digitales). El sistema aborda escenarios de alta complejidad, como facturas arrugadas, rotas, con sellos superpuestos y en múltiples idiomas.
+## Características principales
 
-Su núcleo combina visión por computadora clásica con modelos de Inteligencia Artificial (LLMs) para ir más allá de un simple OCR, logrando una **extracción estructurada y semántica** de la información. Además, implementa una arquitectura Híbrida/RAG que permite consultar el histórico de documentos procesados mediante lenguaje natural, sentando las bases para una automatización a gran escala.
+- Pipeline OCR multi-paso con selección automática de la mejor pasada (imagen original, realzada con CLAHE + upscale, o binarizada con OTSU).
+- Decodificación QR multi-estrategia: pyzbar + detector nativo de OpenCV sobre 6 variantes de la imagen (escalas y umbrales).
+- Extracción del código fiscal CUFE desde la imagen (vía Gemini Vision) y construcción automática del enlace de validación DIAN.
+- Estrategia híbrida de LLMs: Qwen 3.5:9b como modelo principal local, Qwen 2.5:7b como fallback local, y Gemini Flash Vision para corrección cuando la confianza del OCR es baja.
+- Reintentos exponenciales automáticos ante saturación de la API de Google (errores 503).
+- JSON válido garantizado por gramática (`format="json"`) y modo de pensamiento desactivado en Qwen para evitar respuestas vacías.
+- Validación determinística post-extracción: coherencia subtotal + impuestos = total, suma de items, presencia de campos críticos.
+- Monitor de carpeta con `watchdog` que procesa archivos automáticamente al llegar.
+- Interfaz Streamlit con seguimiento de progreso en tiempo real y JSON copiable.
+- Persistencia vectorial en ChromaDB preparada para RAG (pendiente de reintegrar el chat).
+- Arquitectura hexagonal (puertos y adaptadores) para permitir sustituir cualquier componente sin tocar el dominio.
 
-## 2. Arquitectura y Decisiones Técnicas
+## Stack tecnológico
 
-El diseño se basa en una arquitectura modular (Separation of Concerns) que permite escalar o reemplazar componentes sin afectar el flujo principal.
+- Python 3.12
+- OpenCV + PyMuPDF: preprocesamiento de imágenes y conversión de PDFs.
+- EasyOCR: extracción de texto con Deep Learning.
+- pyzbar + cv2.QRCodeDetector: decodificación de códigos QR.
+- Ollama: ejecución local de modelos Qwen (privacidad + latencia baja).
+- Google Gemini API (SDK `google-genai`): visión multimodal para documentos de baja calidad.
+- ChromaDB: base de datos vectorial local para embeddings.
+- Streamlit: interfaz web local.
+- watchdog: monitor de carpeta en segundo plano.
+- Tenacity: reintentos exponenciales para servicios externos.
 
-### A. Preprocesamiento y Extracción Óptica (OCR)
+## Estructura del repositorio
 
-* **Decisión:** Uso de **OpenCV** para el preprocesamiento, **EasyOCR** para el texto y **pyzbar** para códigos de barras/QR.
-* **Justificación:** Se descartó Tesseract OCR porque es altamente sensible al ruido. EasyOCR, al estar basado en Deep Learning, es excepcionalmente robusto frente a documentos rotos, textos inclinados, fuentes no estándar y sellos. OpenCV actúa como un filtro previo para binarizar y normalizar la imagen. `pyzbar` extrae datos implícitos o fiscales ocultos en los QR, aportando una capa de validación extra.
+``` bash
+repo/SREED/
+├── invoices/
+│   ├── input/          Carpeta monitoreada por watchdog
+│   ├── processed/      Documentos exitosos + JSON lateral
+│   ├── failed/         Documentos con error
+│   └── review/         (pendiente) cola de revisión manual
+├── resources/
+│   ├── chroma/         Base de datos vectorial
+│   ├── logs/           Logs persistentes del monitor
+│   ├── models/         Modelfiles personalizados de Ollama
+│   └── scripts/        Utilidades
+├── src/
+│   ├── application/
+│   │   ├── ports/      Contratos (DocumentProcessor, LLMProvider, etc.)
+│   │   └── use_cases/  ProcessDocument, IndexDocument, AnswerQuestion
+│   ├── domain/
+│   │   ├── models.py   DocumentResult, DocumentStatus, ChatMessage
+│   │   └── validation.py   Validaciones determinísticas
+│   ├── infrastructure/adapters/
+│   │   ├── chroma/     ChromaVectorStore
+│   │   ├── filesystem/ LocalFileSystemAdapter
+│   │   ├── llm/        QwenOllamaProvider, GeminiVisionProvider, QwenGeminiStrategy
+│   │   ├── ocr/        OpenCV, EasyOCR, pyzbar, PyMuPDF, OCRRealDocumentProcessor
+│   │   └── rpa/        WatchdogAdapter
+│   └── interface/      monitor_rpa.py, streamlit_app.py
+├── orchestrator.py     Arranque unificado de todos los servicios
+├── .env                Variables de entorno
+└── requirements.txt
+```
 
-### B. Motor de Extracción Estructurada (IA Híbrida)
+## Pipeline de procesamiento
 
-* **Decisión:** Orquestación de dos modelos distintos según la tarea.
-* *Tarea de Estructuración (JSON):* **API de Google Gemini (1.5 Flash)**.
-* *Tarea de RAG/Chat Analítico:* **Qwen2.5-7B-Instruct (Despliegue Local)**.
+Para cada documento que entra a `invoices/input/`:
 
+1. **Watchdog** detecta el archivo y espera 1 segundo de estabilidad (debounce).
+2. **OCR multi-paso** ejecuta EasyOCR sobre tres variantes de la imagen y conserva la de mayor confianza:
+   - Original
+   - Realzada (upscale 3x + CLAHE + escala de grises)
+   - Binarizada (OTSU)
+3. **Decodificador QR** prueba pyzbar y cv2.QRCodeDetector sobre 6 variantes de la imagen.
+4. **Qwen 3.5:9b** extrae campos clave del texto OCR en ~15-80s con JSON garantizado por gramática.
+5. Si la confianza del OCR es menor a 0.6, se activa **Gemini Vision**:
+   - Reintenta hasta 3 veces con backoff exponencial si Google devuelve 503.
+   - Extrae esquema completo (incluyendo items, CUFE y observaciones).
+   - El resultado se fusiona con el de Qwen: Gemini gana en campos críticos (total, impuestos, subtotal, NIT, proveedor, items, CUFE).
+6. **Validación determinística** verifica coherencia matemática y presencia de campos.
+7. El documento se mueve a `processed/` o `failed/` junto con su JSON lateral.
+8. **ChromaDB** indexa el documento para futuras consultas RAG.
 
-* **Justificación:** La ingeniera solicitó explícitamente familiaridad con modelos LLM (como "Luna" o GPT) para interpretar los datos. Utilizar Gemini garantiza una estructuración rápida y precisa del texto desordenado en un formato JSON limpio (Proveedor, NIT, Total, etc.) a costo cero. Por otro lado, usar Qwen en local para responder preguntas sobre el histórico de facturas demuestra conocimientos de ciberseguridad y privacidad de datos, asegurando que la analítica de la empresa no dependa 100% de la nube.
+## Configuración
 
+Variables principales en `.env`:
 
-* **Resiliencia:** El sistema incluye un *Switch Offline*, permitiendo que el modelo local asuma la tarea de estructuración si la API externa falla.
+```env
+SREED_PRIMARY_MODEL=qwen3.5:9b
+SREED_FALLBACK_MODEL=qwen2.5:7b
+SREED_GEMINI_API_KEY=<tu_clave>
+SREED_GEMINI_MODEL=gemini-3.6-flash
+SREED_LLM_MODE=qwen_gemini
+SREED_LLM_TIMEOUT=1800
+SREED_OCR_LANGUAGES=es,en
+SREED_USE_GPU=true
+SREED_CHROMA_COLLECTION=sreed_documents
+SREED_RAG_TOP_K=5
+```
 
-### C. Automatización de Flujos (RPA Ligero)
+## Uso
 
-* **Decisión:** Implementación de un demonio en segundo plano usando la librería **`watchdog`** en Python.
+### Opción 1: Orquestador unificado (recomendado)
 
+```bash
+python orchestrator.py
+```
 
-* **Justificación:** Para cubrir la expectativa de automatización, el sistema no depende exclusivamente de que el usuario cargue el archivo manualmente. El script monitorea activamente una carpeta del sistema operativo. Cuando un sistema de terceros (ej. un cliente de correo) descarga una factura allí, el sistema la procesa automáticamente.
+Arranca Ollama (si no corre), asegura los modelos, inicia el monitor y Streamlit en segundo plano.
 
-### D. Persistencia y Vectorización
+### Opción 2: Componentes por separado
 
-* **Decisión:** Uso de **ChromaDB** como base de datos vectorial local.
-* **Justificación:** Para lograr un MVP funcional en pocos días, ChromaDB permite incrustar (embed) los JSON resultantes sin necesidad de levantar servidores ni configurar redes. Demuestra el conocimiento de bases de datos vectoriales necesarias para flujos evolutivos y agentes IA. *Nota de escalabilidad: El código está diseñado con puertos y adaptadores; para producción, ChromaDB se puede sustituir por PostgreSQL con la extensión `pgvector*`.
+```bash
+# Terminal 1: monitor en background
+python -m src.interface.monitor_rpa
 
+# Terminal 2: interfaz web
+streamlit run src/interface/streamlit_app.py
+```
 
+### Opción 3: Solo monitor (headless)
 
-## 3. Interfaces de Usuario
+```bash
+python -m src.interface.monitor_rpa
+```
 
-El usuario final interactuará con el sistema de dos formas complementarias:
+Copia archivos a `invoices/input/` y serán procesados automáticamente.
 
-### Interfaz 1: Carpeta Activa de Automatización (Background)
+## Estrategia híbrida de LLMs
 
-* **Descripción:** Una simple carpeta en el sistema operativo (ej. `C:\SREED_Input\`).
-* **Uso:** El usuario (o un sistema legacy) simplemente arrastra, copia o guarda los archivos PDF/PNG/JPG en esta carpeta. No hay botones ni clics; el sistema `watchdog` los detecta, los procesa de forma invisible y mueve el archivo a una subcarpeta de `Procesados/`, dejando el JSON resultante listo en la base de datos.
+| Rol | Modelo | Ejecución | Tarea |
+|-----|--------|-----------|-------|
+| Principal | Qwen 3.5:9b | Local (Ollama) | Extraer campos clave del texto OCR (tarea corta, ~15-80s) |
+| Fallback | Qwen 2.5:7b | Local (Ollama) | Asumir si el principal falla 3 veces seguidas |
+| Visión | Gemini 3.6 Flash | Nube | Corregir y completar cuando OCR confidence < 0.6 |
 
-### Interfaz 2: Dashboard Interactivo (Streamlit)
-
-* **Descripción:** Una aplicación web local accesible desde el navegador, con un diseño limpio y corporativo. Se eligió Streamlit sobre Gradio por su capacidad para manejar múltiples vistas y mantener el estado de la sesión.
-* **Uso y Vistas:**
-* **Pestaña de Procesamiento Manual:** Una zona de *Drag & Drop* para subir una factura específica. Al procesarla, muestra la pantalla dividida: a la izquierda la imagen de la factura con recuadros sobre el texto detectado, y a la derecha el JSON estructurado con los datos extraídos (y un botón para corregirlos manualmente si es necesario).
-* **Pestaña de Asistente Analítico (RAG):** Una interfaz de chat. El usuario puede escribir en lenguaje natural: *"Genera un resumen de los impuestos pagados a proveedores de tecnología esta semana"*. El sistema busca en ChromaDB y el modelo Qwen genera la respuesta basándose en los datos extraídos previamente.
-* **Configuración:** Un panel lateral para hacer el *switch* entre API Nube (Gemini) y Modelo Local (Qwen).
-
-
-
-## 4. Lista de Entregables (Estructura del Repositorio)
-
-El proyecto se entregará en un repositorio Git estructurado de la siguiente manera, listo para su ejecución local:
-
-* 📁 `proyecto_ocr_rag/`
-* 📁 `input_facturas/` *(Carpeta monitoreada por el sistema)*.
-* 📁 `facturas_procesadas/` *(Carpeta destino para documentos ya leídos)*.
-* 📁 `db_vectorial/` *(Directorio autogenerado por ChromaDB para la persistencia)*.
-* 📄 `app.py` *(Punto de entrada del Front-end en Streamlit).*
-* 📄 `monitor_rpa.py` *(Script demonio para la automatización con Watchdog).*
-* 📄 `motor_ocr.py` *(Módulo lógico: OpenCV, EasyOCR, pyzbar).*
-* 📄 `extractor_llm.py` *(Módulo de orquestación de LLMs: Prompts para Gemini y Qwen).*
-* 📄 `rag_chat.py` *(Módulo de consulta: Embeddings y recuperación con ChromaDB).*
-* 📄 `requirements.txt` *(Dependencias estrictas para replicar el entorno: opencv-python, easyocr, streamlit, chromadb, google-genai", etc.).*
-* 📄 `README.md` *(Documentación técnica, justificación de arquitectura y guía de ejecución).*
+El sistema nunca depende 100% de la nube: si Gemini está saturado (error 503), el resultado de Qwen se conserva y el documento se procesa igualmente.

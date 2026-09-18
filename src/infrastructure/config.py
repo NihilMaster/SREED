@@ -117,7 +117,7 @@ def load_settings(project_root: Path | None = None) -> Settings:
         
         # Gemini (opcional)
         gemini_api_key=os.getenv("SREED_GEMINI_API_KEY", ""),
-        gemini_model=os.getenv("SREED_GEMINI_MODEL", "gemini-flash-latest"),
+        gemini_model=os.getenv("SREED_GEMINI_MODEL", "gemini-3.6-flash"),
         
         # Modo de operación
         llm_mode=os.getenv("SREED_LLM_MODE", "qwen_only"),

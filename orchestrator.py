@@ -103,7 +103,7 @@ class SREEDOrchestrator:
     def start_monitor(self):
         """Inicia el monitor RPA"""
         logger.info("Iniciando monitor RPA...")
-        log_file = open(self.log_dir / "monitor.log", "a", encoding="utf-8")
+        log_file = open(self.log_dir / "resources/logs/monitor.log", "a", encoding="utf-8")
         process = subprocess.Popen(
             [sys.executable, "-m", "src.interface.monitor_rpa"],
             cwd=self.project_root,
@@ -116,7 +116,7 @@ class SREEDOrchestrator:
     def start_streamlit(self):
         """Inicia Streamlit"""
         logger.info("Iniciando Streamlit...")
-        log_file = open(self.log_dir / "streamlit.log", "a", encoding="utf-8")
+        log_file = open(self.log_dir / "resources/logs/streamlit.log", "a", encoding="utf-8")
         process = subprocess.Popen(
             [sys.executable, "-m", "streamlit", "run",
             "src/interface/streamlit_app.py",
@@ -169,23 +169,18 @@ class SREEDOrchestrator:
         self.processes.clear()
     
     def run(self):
-        """Ejecuta el orquestador"""
         try:
             self.start_all()
-            
-            # Mantener corriendo
             while True:
-                time.sleep(1)
-                
-                # Verificar que los procesos sigan vivos
+                time.sleep(2)
                 for name, process in self.processes:
                     if process.poll() is not None:
-                        logger.error(f"Proceso {name} murió inesperadamente")
+                        # Leer las últimas 5 líneas del log del proceso muerto para saber por qué cayó
+                        logger.error(f"Proceso {name} murió inesperadamente (Código: {process.returncode})")
                         self.stop_all()
                         sys.exit(1)
-                        
         except KeyboardInterrupt:
-            pass
+            logger.info("Interrupción recibida, apagando limpiamente...")
         finally:
             self.stop_all()
 

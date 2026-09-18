@@ -113,13 +113,15 @@ def render_sidebar(settings, vector_store) -> None:
         if st.button("Actualizar vista", key="sidebar_refresh"):
             st.rerun()
 
+def filter_gitkeep(files):
+    return [f for f in files if f.name != ".gitkeep"]
 
 def render_monitor_tab(settings, file_system) -> None:
     st.subheader("Monitor de carpeta")
 
-    input_files = file_system.list_files(settings.input_dir)
-    processed_files = file_system.list_files(settings.processed_dir)
-    failed_files = file_system.list_files(settings.failed_dir)
+    input_files = filter_gitkeep(file_system.list_files(settings.input_dir))
+    processed_files = filter_gitkeep(file_system.list_files(settings.processed_dir))
+    failed_files = filter_gitkeep(file_system.list_files(settings.failed_dir))
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Entrada", len(input_files))
@@ -238,6 +240,9 @@ def render_results_tab(settings, file_system) -> None:
     directory = settings.processed_dir if option == "Procesados" else settings.failed_dir
     files = file_system.list_files(directory)
 
+    # Excluir .gitkeep
+    files = [f for f in files if f.name != ".gitkeep"]
+
     if not files:
         st.info("No hay documentos en la carpeta seleccionada.")
         return
@@ -264,7 +269,6 @@ def render_results_tab(settings, file_system) -> None:
     else:
         formatted_json = str(sidecar)
 
-    # st.code garantiza que el JSON sea copiable con un clic y tenga sintaxis resaltada
     st.code(formatted_json, language="json")
 
 

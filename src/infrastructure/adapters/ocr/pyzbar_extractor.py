@@ -1,5 +1,5 @@
+import cv2
 import pyzbar.pyzbar as pyzbar
-from PIL import Image
 from pathlib import Path
 from typing import List
 import logging
@@ -10,53 +10,72 @@ logger = logging.getLogger(__name__)
 
 
 class PyzbarQRExtractor(QRExtractorPort):
-    """Extractor de códigos QR usando pyzbar"""
-    
+    """
+    Extractor QR resiliente: prueba pyzbar y el detector de OpenCV sobre
+    multiples variantes de la imagen (escalas y umbrales), porque los QR
+    densos de la DIAN suelen requerir escalado para decodificarse.
+    """
+
     def extract(self, image_path: str) -> List[QRCode]:
-        """
-        Extrae códigos QR y códigos de barras de una imagen
-        
-        Returns:
-            Lista de QRCode detectados
-        """
         try:
             if not Path(image_path).exists():
                 raise FileNotFoundError(f"Imagen no encontrada: {image_path}")
-            
-            # Abrir imagen con PIL
-            img = Image.open(image_path)
-            
-            # Decodificar códigos
-            decoded_objects = pyzbar.decode(img)
-            
-            if not decoded_objects:
-                logger.info(f"No se detectaron códigos QR en: {image_path}")
+
+            img = cv2.imread(image_path)
+            if img is None:
                 return []
-            
-            qr_codes = []
-            for obj in decoded_objects:
-                # Extraer posición
-                rect = obj.rect
-                position = (rect.left, rect.top, rect.width, rect.height)
-                
-                # Decodificar datos
-                try:
-                    data = obj.data.decode('utf-8')
-                except:
-                    data = str(obj.data)
-                
-                qr_codes.append(QRCode(
-                    data=data,
-                    qr_type=obj.type,
-                    position=position
-                ))
-                
-                logger.info(f"Detectado {obj.type}: {data[:50]}...")
-            
-            logger.info(f"Total códigos detectados: {len(qr_codes)}")
-            return qr_codes
-            
+
+            for name, candidate in self._build_candidates(img):
+                codes = self._decode_pyzbar(candidate)
+                if not codes:
+                    codes = self._decode_opencv(candidate)
+                if codes:
+                    logger.info(f"QR detectado con estrategia: {name} ({len(codes)} códigos)")
+                    return codes
+
+            logger.info(f"No se detectaron códigos QR en: {image_path}")
+            return []
+
         except Exception as e:
             logger.warning(f"Error extrayendo QR (no crítico): {e}")
-            # No es crítico si falla QR, continuar sin ellos
             return []
+
+    def _build_candidates(self, img):
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        up2 = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+        up3 = cv2.resize(gray, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
+        _, up2_otsu = cv2.threshold(up2, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        return [
+            ("original", img),
+            ("gris", gray),
+            ("otsu", otsu),
+            ("up2", up2),
+            ("up3", up3),
+            ("up2_otsu", up2_otsu),
+        ]
+
+    def _decode_pyzbar(self, candidate) -> List[QRCode]:
+        try:
+            decoded = pyzbar.decode(candidate)
+        except Exception:
+            return []
+        codes = []
+        for obj in decoded:
+            rect = obj.rect
+            try:
+                data = obj.data.decode("utf-8")
+            except Exception:
+                data = str(obj.data)
+            codes.append(QRCode(data=data, qr_type=obj.type, position=(rect.left, rect.top, rect.width, rect.height)))
+        return codes
+
+    def _decode_opencv(self, candidate) -> List[QRCode]:
+        try:
+            detector = cv2.QRCodeDetector()
+            data, points, _ = detector.detectAndDecode(candidate)
+        except Exception:
+            return []
+        if data:
+            return [QRCode(data=data, qr_type="QRCODE", position=None)]
+        return []
