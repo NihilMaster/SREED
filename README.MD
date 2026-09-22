@@ -1,137 +1,253 @@
-# SREED - Sistema Resiliente de Extracción Estructurada de Documentos
+# SREED — Sistema Resiliente de Extracción Estructurada de Documentos
 
-Sistema local de procesamiento automático de facturas escaneadas o digitales, diseñado para entornos con documentos de calidad variable (arrugados, rotos, con sellos superpuestos, en español e inglés). Combina visión por computadora clásica, modelos de lenguaje locales y visión multimodal en la nube para producir extracciones estructuradas con validación determinística.
+SREED es un pipeline automatizado y resiliente para la ingesta, procesamiento, estructuración y consulta analítica de facturas electrónicas y tickets de venta. Combina OCR multivariado, modelos de lenguaje locales (Ollama) y en la nube (Google Gemini), validaciones determinísticas y verificación fiscal (DIAN) para garantizar precisión y trazabilidad en documentos de calidad variable.
 
-## Características principales
+---
 
-- Pipeline OCR multi-paso con selección automática de la mejor pasada (imagen original, realzada con CLAHE + upscale, o binarizada con OTSU).
-- Decodificación QR multi-estrategia: pyzbar + detector nativo de OpenCV sobre 6 variantes de la imagen (escalas y umbrales).
-- Extracción del código fiscal CUFE desde la imagen (vía Gemini Vision) y construcción automática del enlace de validación DIAN.
-- Estrategia híbrida de LLMs: Qwen 3.5:9b como modelo principal local, Qwen 2.5:7b como fallback local, y Gemini Flash Vision para corrección cuando la confianza del OCR es baja.
-- Reintentos exponenciales automáticos ante saturación de la API de Google (errores 503).
-- JSON válido garantizado por gramática (`format="json"`) y modo de pensamiento desactivado en Qwen para evitar respuestas vacías.
-- Validación determinística post-extracción: coherencia subtotal + impuestos = total, suma de items, presencia de campos críticos.
-- Monitor de carpeta con `watchdog` que procesa archivos automáticamente al llegar.
-- Interfaz Streamlit con seguimiento de progreso en tiempo real y JSON copiable.
-- Persistencia vectorial en ChromaDB preparada para RAG (pendiente de reintegrar el chat).
-- Arquitectura hexagonal (puertos y adaptadores) para permitir sustituir cualquier componente sin tocar el dominio.
+## Características Principales
 
-## Stack tecnológico
+- **OCR Resiliente Multi-paso**: EasyOCR combinado con preprocesamiento OpenCV (escalado, escala de grises, CLAHE, binarización) para maximizar la extracción en imágenes de baja calidad.
+- **Estrategia Híbrida de LLM**: Qwen 3.5:9b local para extracción rápida de campos clave, con Gemini 3.6 Flash Vision como corrector automático cuando la confianza del OCR es baja (< 0.6).
+- **Cross-Check Fiscal DIAN**: Parser determinístico que extrae datos del código QR fiscal (NumFac, FecFac, NitFac, ValFac, ValIva, CUFE) con prioridad absoluta sobre el LLM.
+- **Validación Matemática Automática**: Detección de inconsistencias (subtotal + impuestos ≠ total) con distinción entre regímenes de IVA incluido (retail) y aditivo (B2B).
+- **RAG con FAISS**: Motor de consulta analítica sobre documentos procesados, utilizando FAISS para búsqueda vectorial robusta y `all-MiniLM-L6-v2` para embeddings locales.
+- **Arquitectura a Prueba de Fallos**: Reintentos automáticos ([backoff exponencial](https://learn.microsoft.com/es-es/dotnet/architecture/microservices/implement-resilient-applications/implement-retries-exponential-backoff)), fallbacks de modelos y almacenamiento en archivos planos para evitar corrupción de datos.
 
-- Python 3.12
-- OpenCV + PyMuPDF: preprocesamiento de imágenes y conversión de PDFs.
-- EasyOCR: extracción de texto con Deep Learning.
-- pyzbar + cv2.QRCodeDetector: decodificación de códigos QR.
-- Ollama: ejecución local de modelos Qwen (privacidad + latencia baja).
-- Google Gemini API (SDK `google-genai`): visión multimodal para documentos de baja calidad.
-- ChromaDB: base de datos vectorial local para embeddings.
-- Streamlit: interfaz web local.
-- watchdog: monitor de carpeta en segundo plano.
-- Tenacity: reintentos exponenciales para servicios externos.
+---
 
-## Estructura del repositorio
+## Arquitectura del Pipeline
+
+El flujo de procesamiento sigue estos pasos para cada documento que ingresa a `invoices/input/`:
+
+1. **Detección**: Watchdog monitorea la carpeta de entrada con [debounce](https://code-garage.com/en/blog/the-concept-of-debounce-what-is-it) y espera de estabilidad del archivo.
+2. **Validación**: Se ignoran archivos temporales, ocultos o con extensiones no soportadas. Archivos soportados: `.pdf`, `.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`.
+3. **Conversión PDF**: Si es PDF, PyMuPDF convierte cada página a imagen PNG con DPI configurable.
+4. **OCR Multivariable**: EasyOCR ejecuta múltiples pasadas (original, mejorada, binarizada) y selecciona la de mayor confianza.
+5. **Extracción de QR**: Se intenta decodificar códigos QR con `pyzbar` y `cv2.QRCodeDetector` sobre versiones originales, grises, OTSU y escaladas.
+6. **Estructuración LLM**: Qwen 3.5:9b extrae campos clave en formato JSON. Si falla consecutivamente, se activa Qwen 2.5:7b como fallback.
+7. **Complemento Gemini**: Si `ocr_confidence < 0.6`, Gemini Vision corrige campos críticos directamente sobre la imagen.
+8. **Cross-Check DIAN**: Si existe QR fiscal, se parsea y sobrescribe los valores del LLM con datos fiscales firmados.
+9. **Validación**: Se normalizan números, se valida coherencia matemática y se registran observaciones.
+10. **Persistencia**: El documento se mueve a `processed/` o `failed/` y se genera un JSON lateral con el resultado completo.
+11. **Indexación**: El texto estructurado se vectoriza con FAISS y se guarda con metadatos para consultas RAG.
+
+---
+
+## Stack Tecnológico
+
+**Lenguaje y Frameworks**: Python 3.12, python-dotenv, Pydantic, Tenacity, watchdog, Streamlit
+
+**Visión y OCR**: Pillow, OpenCV, NumPy, EasyOCR, pyzbar, PyMuPDF
+
+**Vectorización y RAG**: FAISS CPU, sentence-transformers (all-MiniLM-L6-v2)
+
+**Modelos de Lenguaje**: Ollama (qwen3.5:9b, qwen2.5:7b), google-genai (Gemini 3.6 Flash)
+
+**Utilidades**: Shell / PowerShell para scripts operativos
+
+---
+
+## Estructura del Repositorio
 
 ``` bash
-repo/SREED/
-├── invoices/
-│   ├── input/          Carpeta monitoreada por watchdog
-│   ├── processed/      Documentos exitosos + JSON lateral
-│   ├── failed/         Documentos con error
-│   └── review/         (pendiente) cola de revisión manual
-├── resources/
-│   ├── chroma/         Base de datos vectorial
-│   ├── logs/           Logs persistentes del monitor
-│   ├── models/         Modelfiles personalizados de Ollama
-│   └── scripts/        Utilidades
-├── src/
-│   ├── application/
-│   │   ├── ports/      Contratos (DocumentProcessor, LLMProvider, etc.)
-│   │   └── use_cases/  ProcessDocument, IndexDocument, AnswerQuestion
-│   ├── domain/
-│   │   ├── models.py   DocumentResult, DocumentStatus, ChatMessage
-│   │   └── validation.py   Validaciones determinísticas
-│   ├── infrastructure/adapters/
-│   │   ├── chroma/     ChromaVectorStore
-│   │   ├── filesystem/ LocalFileSystemAdapter
-│   │   ├── llm/        QwenOllamaProvider, GeminiVisionProvider, QwenGeminiStrategy
-│   │   ├── ocr/        OpenCV, EasyOCR, pyzbar, PyMuPDF, OCRRealDocumentProcessor
-│   │   └── rpa/        WatchdogAdapter
-│   └── interface/      monitor_rpa.py, streamlit_app.py
-├── orchestrator.py     Arranque unificado de todos los servicios
-├── .env                Variables de entorno
-└── requirements.txt
+SREED/
+├── invoices/                          # Carpetas de flujo de trabajo
+│   ├── input/                         # Archivos pendientes (monitoreados por watchdog)
+│   ├── processed/                     # Documentos procesados exitosamente + JSONs laterales
+│   └── failed/                        # Documentos con errores o no soportados
+│
+├── resources/                         # Recursos persistentes y utilidades
+│   ├── faiss/                         # Índice vectorial FAISS y metadatos (documents.json)
+│   ├── logs/                          # Logs de ejecución del monitor, Streamlit y LLMs
+│   ├── models/                        # Modelfiles personalizados de Ollama
+│   └── scripts/                       # Scripts de utilidad
+│       ├── diagnose_rag.py            # Diagnóstico de documentos indexados y recuperación
+│       ├── reindex_from_sidecars.py   # Reindexación desde JSONs procesados
+│       ├── tree.ps1                   # Comando PowerShell para exploración de carpetas
+│       └── verify_config.py           # Verificación de configuración y dependencias
+│
+├── src/                               # Código fuente (Arquitectura Hexagonal)
+│   ├── application/                   # Casos de uso y puertos (lógica de negocio)
+│   │   ├── ports/                     # Interfaces abstractas
+│   │   │   ├── document_processor.py  # Puerto para procesamiento de documentos
+│   │   │   ├── file_system.py         # Puerto para operaciones de archivo
+│   │   │   ├── image_preprocessor.py  # Puerto para preprocesamiento de imágenes
+│   │   │   ├── llm_provider.py        # Puerto para proveedores de LLM
+│   │   │   ├── ocr_extractor.py       # Puerto para extractores OCR
+│   │   │   ├── qr_extractor.py        # Puerto para extractores de códigos QR
+│   │   │   └── vector_store.py        # Puerto para almacenamiento vectorial
+│   │   └── use_cases/                 # Casos de uso concretos
+│   │       ├── answer_question.py     # Caso de uso para consultas RAG
+│   │       ├── index_document.py      # Caso de uso para indexación de documentos
+│   │       ├── process_and_index_document.py  # Orquestación de procesamiento + indexación
+│   │       └── process_document.py    # Caso de uso para procesamiento de documentos
+│   │
+│   ├── domain/                        # Modelos de dominio y reglas de negocio
+│   │   ├── dian_qr.py                 # Parser de QR fiscal DIAN y cross-check
+│   │   ├── models.py                  # Entidades: DocumentResult, ChatMessage, RetrievedDocument
+│   │   └── validation.py              # Reglas de validación matemática y de formato
+│   │
+│   ├── infrastructure/                # Adaptadores e implementaciones concretas
+│   │   ├── adapters/                  # Implementaciones de puertos
+│   │   │   ├── faiss/                 # Adaptador FAISS para búsqueda vectorial
+│   │   │   ├── filesystem/            # Adaptador de sistema de archivos local
+│   │   │   ├── llm/                   # Adaptadores de LLMs (Qwen, Gemini, estrategia híbrida)
+│   │   │   ├── ocr/                   # Adaptadores OCR (EasyOCR, OpenCV, PyMuPDF, pyzbar)
+│   │   │   └── rpa/                   # Adaptador watchdog para monitoreo de carpetas
+│   │   └── config.py                  # Carga y validación de configuración desde .env
+│   │
+│   └── interface/                     # Interfaces de usuario y servicios
+│       ├── monitor_rpa.py             # Servicio de monitoreo de carpetas (watchdog)
+│       └── streamlit_app.py           # Aplicación web Streamlit (dashboard y chat RAG)
+│
+├── orchestrator.py                    # Script de orquestación para iniciar todos los servicios
+├── .env.example                       # Plantilla de variables de entorno
+├── requirements.txt                   # Dependencias Python del proyecto
+├── README.MD                          # Este archivo
+└── .gitignore                         # Archivos y carpetas ignorados por Git
 ```
 
-## Pipeline de procesamiento
+---
 
-Para cada documento que entra a `invoices/input/`:
+## Instalación y Configuración
 
-1. **Watchdog** detecta el archivo y espera 1 segundo de estabilidad (debounce).
-2. **OCR multi-paso** ejecuta EasyOCR sobre tres variantes de la imagen y conserva la de mayor confianza:
-   - Original
-   - Realzada (upscale 3x + CLAHE + escala de grises)
-   - Binarizada (OTSU)
-3. **Decodificador QR** prueba pyzbar y cv2.QRCodeDetector sobre 6 variantes de la imagen.
-4. **Qwen 3.5:9b** extrae campos clave del texto OCR en ~15-80s con JSON garantizado por gramática.
-5. Si la confianza del OCR es menor a 0.6, se activa **Gemini Vision**:
-   - Reintenta hasta 3 veces con backoff exponencial si Google devuelve 503.
-   - Extrae esquema completo (incluyendo items, CUFE y observaciones).
-   - El resultado se fusiona con el de Qwen: Gemini gana en campos críticos (total, impuestos, subtotal, NIT, proveedor, items, CUFE).
-6. **Validación determinística** verifica coherencia matemática y presencia de campos.
-7. El documento se mueve a `processed/` o `failed/` junto con su JSON lateral.
-8. **ChromaDB** indexa el documento para futuras consultas RAG.
+### Requisitos Previos
 
-## Configuración
+- Python 3.12+
+- Ollama instalado y corriendo en `http://localhost:11434`
+- Modelos Ollama: `qwen3.5:9b` y `qwen2.5:7b`
+- API Key de Google Gemini con permisos para `generativelanguage.googleapis.com`
 
-Variables principales en `.env`:
+### Pasos de Instalación
 
-```env
-SREED_PRIMARY_MODEL=qwen3.5:9b
-SREED_FALLBACK_MODEL=qwen2.5:7b
-SREED_GEMINI_API_KEY=<tu_clave>
-SREED_GEMINI_MODEL=gemini-3.6-flash
-SREED_LLM_MODE=qwen_gemini
-SREED_LLM_TIMEOUT=1800
-SREED_OCR_LANGUAGES=es,en
-SREED_USE_GPU=true
-SREED_CHROMA_COLLECTION=sreed_documents
-SREED_RAG_TOP_K=5
-```
+1. **Clonar el repositorio y crear entorno virtual**:
+
+   ``` bash
+   python -m venv .venv
+   ```
+
+   En Windows PowerShell:
+
+   ``` powershell
+   .\.venv\Scripts\Activate.ps1
+   ```
+
+   En Linux/macOS:
+
+   ``` bash
+   source .venv/bin/activate
+   ```
+
+2. **Instalar dependencias**:
+
+   ``` bash
+   pip install -r requirements.txt
+   ```
+
+3. **Configurar variables de entorno**:
+
+   Copia `.env.example` a `.env` y completa los valores:
+
+   ```env
+   SREED_PRIMARY_MODEL=qwen3.5:9b
+   SREED_FALLBACK_MODEL=qwen2.5:7b
+   SREED_GEMINI_API_KEY=tu_api_key_aqui
+   SREED_GEMINI_MODEL=gemini-3.6-flash
+   SREED_LLM_MODE=qwen_gemini
+   SREED_LLM_TIMEOUT=900
+   ```
+
+4. **Verificar configuración**:
+
+   ```bash
+   python resources/scripts/verify_config.py
+   ```
+
+---
 
 ## Uso
 
-### Opción 1: Orquestador unificado (recomendado)
+### Opción Recomendada: Orquestador
+
+El orquestador verifica dependencias, inicia Ollama si es necesario, y lanza todos los servicios:
 
 ```bash
 python orchestrator.py
 ```
 
-Arranca Ollama (si no corre), asegura los modelos, inicia el monitor y Streamlit en segundo plano.
+Accede a la interfaz web en `http://localhost:8501`.
 
-### Opción 2: Componentes por separado
+### Ejecución Manual de Servicios
+
+**Monitor de procesamiento** (escucha `invoices/input/`):
 
 ```bash
-# Terminal 1: monitor en background
 python -m src.interface.monitor_rpa
+```
 
-# Terminal 2: interfaz web
+**Interfaz web Streamlit** (dashboard y chat RAG):
+
+```bash
 streamlit run src/interface/streamlit_app.py
 ```
 
-### Opción 3: Solo monitor (headless)
+Con el monitor activo, copia archivos a `invoices/input/` para iniciar el flujo automático.
+
+---
+
+## Utilidades y Mantenimiento
+
+### Diagnóstico de RAG
+
+Verifica documentos indexados y recuperación de consultas:
 
 ```bash
-python -m src.interface.monitor_rpa
+python resources/scripts/diagnose_rag.py
 ```
 
-Copia archivos a `invoices/input/` y serán procesados automáticamente.
+### Reindexación desde Sidecars
 
-## Estrategia híbrida de LLMs
+Reconstruye el índice FAISS desde los JSONs procesados:
 
-| Rol | Modelo | Ejecución | Tarea |
-|-----|--------|-----------|-------|
-| Principal | Qwen 3.5:9b | Local (Ollama) | Extraer campos clave del texto OCR (tarea corta, ~15-80s) |
-| Fallback | Qwen 2.5:7b | Local (Ollama) | Asumir si el principal falla 3 veces seguidas |
-| Visión | Gemini 3.6 Flash | Nube | Corregir y completar cuando OCR confidence < 0.6 |
+```bash
+python resources/scripts/reindex_from_sidecars.py
+```
 
-El sistema nunca depende 100% de la nube: si Gemini está saturado (error 503), el resultado de Qwen se conserva y el documento se procesa igualmente.
+Para reindexación completa (borra índice existente):
+
+```bash
+python resources/scripts/reindex_from_sidecars.py --reset
+```
+
+---
+
+## Estrategia de LLMs
+
+| Flujo | Modelo / Proveedor | Ejecución | Tarea |
+| ------- | ------------------- | ----------- | ------- |
+| Extracción principal | Qwen 3.5:9b | Local (Ollama) | Extraer campos estructurados desde OCR |
+| Fallback local | Qwen 2.5:7b | Local (Ollama) | Mantener el flujo si Qwen principal falla |
+| Corrección visual | Gemini Vision | Nube (Google GenAI) | Complementar OCR de baja confianza, completar CUFE e items |
+| RAG / respuesta de consulta | Qwen 2.5:7b | Local (Ollama) | Responder con contexto recuperado en FAISS |
+
+**Notas importantes**:
+
+- La base del sistema es local. Gemini es opcional y se usa solo como complemento para OCR difícil.
+- La extracción estructurada exige JSON válido con temperatura baja.
+- El RAG responde con texto libre usando solo el contexto recuperado, sin alucinaciones.
+
+---
+
+## Consideraciones de Diseño
+
+SREED está diseñado para entornos de captura heterogénea, donde la calidad de las facturas varía significativamente. El valor del sistema no reside únicamente en el uso de modelos de IA avanzados, sino en la construcción de un pipeline resiliente que:
+
+- **Maneja documentos reales**: OCR con múltiples pasadas, preprocesamiento adaptativo y decodificación QR robusta.
+- **Garantiza precisión fiscal**: Cross-check con QR DIAN como fuente autoritativa firmada.
+- **Detecta errores automáticamente**: Validación matemática que identifica inconsistencias antes de que lleguen al usuario final.
+- **Opera sin dependencia de la nube**: Fallbacks locales y persistencia en archivos planos aseguran continuidad operativa.
+- **Proporciona trazabilidad completa**: Cada decisión del sistema está documentada en JSONs laterales con métricas de confianza y observaciones.
+
+Este enfoque prioriza la robustez y la confiabilidad sobre la complejidad innecesaria, haciendo de SREED un MVP de nivel producción listo para entornos empresariales reales.
+
+---
